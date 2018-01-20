@@ -14,7 +14,9 @@ using json = nlohmann::json;
 
 // For converting back and forth between radians and degrees.
 constexpr double pi() { return M_PI; }
+
 double deg2rad(double x) { return x * pi() / 180; }
+
 double rad2deg(double x) { return x * 180 / pi(); }
 
 // Checks if the SocketIO event has JSON data.
@@ -91,6 +93,9 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          double delta = j[1]["steering_angle"] ;
+          delta = -delta * deg2rad(25);
+          double a = j[1]["throttle"];
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -98,13 +103,60 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
+          Eigen::VectorXd coeffs;
+
+          int latency = 100;
+          px = px + latency  * v * cos(psi) / 1000;
+          py = py + latency  * v * sin(psi) / 1000;
+          v = v + latency  * a / 1000;
+          psi = psi + v / 2.67 * delta * latency / 1000;
+
+          std::cout << "px: " << px << "\n";
+          std::cout << "py: " << py << "\n";
+          std::cout << "psi: " << psi << "\n";
+          std::cout << "v: " << v << "\n";
+
+          Eigen::VectorXd x_array(ptsx.size());
+          Eigen::VectorXd y_array(ptsx.size());
+          for (unsigned int i = 0; i < ptsx.size(); i++) {
+            double x_middle = ptsx[i] - px;
+            double y_middle = ptsy[i] - py;
+            double x_transformed = x_middle * std::cos(-psi) - y_middle * std::sin(-psi);
+            double y_transformed = x_middle * std::sin(-psi) + y_middle * std::cos(-psi);
+
+            x_array(i) = x_transformed;
+            y_array(i) = y_transformed;
+          }
+          std::cout << x_array << std::endl;
+          std::cout << y_array << std::endl;
+
+
+          double px_trans = 0;
+          double py_trans = 0;
+          double psi_trans = 0;
+          coeffs = polyfit(x_array, y_array, 3);
+
+          double cte;
+          double epsi;
+          cte = -polyeval(coeffs, 0);
+
+          double derivative = 3 * coeffs[3] * px_trans * px_trans + 2 * coeffs[2] * px_trans + coeffs[1];
+          epsi = -atan(derivative);
+          Eigen::VectorXd state(6);
+          state << px_trans, py_trans, psi_trans, v, cte, epsi;
+
+          std::cout << state << std::endl;
+
+          vector<double> result = mpc.Solve(state, coeffs);
           double steer_value;
           double throttle_value;
+          steer_value = result[0];
+          throttle_value = result[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = -steer_value / deg2rad(25);
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
@@ -114,6 +166,11 @@ int main() {
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
 
+          for (unsigned int i = 4; i < result.size(); i += 2) {
+            mpc_x_vals.push_back(result[i]);
+            mpc_y_vals.push_back(result[i + 1]);
+          }
+
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
@@ -121,6 +178,10 @@ int main() {
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
+          for (unsigned int i = 1; i < ptsx.size(); i++) {
+            next_x_vals.push_back(x_array[i]);
+            next_y_vals.push_back(polyeval(coeffs, x_array[i]));
+          }
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
 
@@ -139,7 +200,7 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
-          this_thread::sleep_for(chrono::milliseconds(100));
+          this_thread::sleep_for(chrono::milliseconds(latency));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
