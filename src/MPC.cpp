@@ -58,25 +58,26 @@ class FG_eval {
     // near err can large ,but long must little
     for (int i = 0; i < N; i++) {
       fg[0] += (10 + i + 1) * CppAD::pow(vars[cte_start + i], 2);
-      fg[0] += (10000 + 2500*(i + 1)) * CppAD::pow(vars[epsi_start + i], 2);
+      fg[0] += (10000 + 2500 * (i + 1)) * CppAD::pow(vars[epsi_start + i], 2);
       //impact average speed
       fg[0] += CppAD::pow(vars[v_start + i] - ref_v, 2);
     }
 
-    //
+    //constraint accelarate and steering angle
     for (int i = 0; i < N - 1; i++) {
       //control zhen dang
       fg[0] += 10000 * CppAD::pow(vars[delta_start + i], 2);
       //impact max speed
       fg[0] += 12 * CppAD::pow(vars[a_start + i], 2);
     }
-    // add curvature_to_speed factor
 
+    //constraint accelerate and steering angle change between nearby timestep
     for (int i = 0; i < N - 2; i++) {
       fg[0] += 1000 * CppAD::pow(vars[delta_start + i] - vars[delta_start + i - 1], 2);
       fg[0] += 12 * CppAD::pow(vars[a_start + i] - vars[a_start + i - 1], 2);
     }
 
+    // TODO add curvature_to_speed factor to decrease speed at curve road
 
     // Setup Constraints
     //
@@ -127,9 +128,6 @@ class FG_eval {
           cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
       fg[1 + epsi_start + t] =
           epsi1 - ((psi0 - psides0) + (v0 / Lf) * delta0 * dt);
-
-//      fg[1 + cte_start + t] = cte1 - (cte0 + v0 * dt * CppAD::sin(epsi0));
-//      fg[1 + epsi_start + t] = epsi1 - (epsi0 + v0 / Lf * delta0 * dt);
     }
   }
 };
@@ -174,8 +172,6 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   Dvector vars_upperbound(n_vars);
   // TODO: Set lower and upper limits for variables.
   for (int i = 0; i < delta_start; i++) {
-//    vars_lowerbound[i] = -1.0e19;
-//    vars_upperbound[i] =  1.0e19;
     vars_lowerbound[i] = INT_MIN;
     vars_upperbound[i] = INT_MAX;
   }
@@ -256,7 +252,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // creates a 2 element double vector.
   std::vector<double> result;
 
-  std::cout << "solution x:\n " << solution.x << std::endl;
+//  std::cout << "solution x:\n " << solution.x << std::endl;
 
   result.push_back(solution.x[delta_start]);
   result.push_back(solution.x[a_start]);

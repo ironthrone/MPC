@@ -1,108 +1,111 @@
-# CarND-Controls-MPC
-Self-Driving Car Engineer Nanodegree Program
+## Model
+The model i use is kinematic car model,just as what the material is taught.  
+There is six status variable : 
+* px: car's x coordinate
+* py: car's y coordinate
+* psi: car's orientation angle
+* v: car's speed
+* cte: cross track error,the distance from car to middle line of road or reference trajectory
+* epsi:orientation angle error, diff between car's orientaion angle and car's desire orientation controlled by reference trajectory  
 
----
+and two actuators:
+* delta: steering angle, produced by steering wheel, actuator
+* a:accelerate, produced by car's throttle ,actuator
 
-## Dependencies
+In every timestep,car runs at a constant speed and orientation.At timestep's end, modify car's speed and orientation according to accelerate and steer angle.
 
-* cmake >= 3.5
- * All OSes: [click here for installation instructions](https://cmake.org/install/)
-* make >= 4.1(mac, linux), 3.81(Windows)
-  * Linux: make is installed by default on most Linux distros
-  * Mac: [install Xcode command line tools to get make](https://developer.apple.com/xcode/features/)
-  * Windows: [Click here for installation instructions](http://gnuwin32.sourceforge.net/packages/make.htm)
-* gcc/g++ >= 5.4
-  * Linux: gcc / g++ is installed by default on most Linux distros
-  * Mac: same deal as make - [install Xcode command line tools]((https://developer.apple.com/xcode/features/)
-  * Windows: recommend using [MinGW](http://www.mingw.org/)
-* [uWebSockets](https://github.com/uWebSockets/uWebSockets)
-  * Run either `install-mac.sh` or `install-ubuntu.sh`.
-  * If you install from source, checkout to commit `e94b6e1`, i.e.
-    ```
-    git clone https://github.com/uWebSockets/uWebSockets
-    cd uWebSockets
-    git checkout e94b6e1
-    ```
-    Some function signatures have changed in v0.14.x. See [this PR](https://github.com/udacity/CarND-MPC-Project/pull/3) for more details.
+```
+px_t1 = px_t + v_t * cos(psi_t) * dt;
+py_t1 = px_t + v_t * sin(psi_t) * dt;
+psi_t1 = psi_t + v_t/Lf * delta_t * dt;
+v_t1 = v_t + a_t * dt;
+cte_t1 = py_t - f(x_t) + v_t * sin(epsi) * dt;
+epsi_t1 = psi_t - psides_t + v_t/Lf * delta * dt;
 
-* **Ipopt and CppAD:** Please refer to [this document](https://github.com/udacity/CarND-MPC-Project/blob/master/install_Ipopt_CppAD.md) for installation instructions.
-* [Eigen](http://eigen.tuxfamily.org/index.php?title=Main_Page). This is already part of the repo so you shouldn't have to worry about it.
-* Simulator. You can download these from the [releases tab](https://github.com/udacity/self-driving-car-sim/releases).
-* Not a dependency but read the [DATA.md](./DATA.md) for a description of the data sent back from the simulator.
+psides_t = atan(f'(x_t))
+//Lf is a constant, means the distance from car's weight center to car's front wheel.In this project , Lf is gaven by the provider
+//f(x) is the polynomial line/ reference trajectory/desired trajectory
+```
 
+## Choose N and dt
+N * dt is horizon, it controls the car's predictive time range.It can neither be too large nor too small.  
+If horizon is too large , disadvantage:
+* there will be many error in the MPC predict,because my model is approximate
+* calculation may speed more time, this is crucial in a real time system
+* remote predict only have little influence to car's current control input
 
-## Basic Build Instructions
+If horizon is too small, disadvantage:
+* car can not have enough information to response to nearby road change
 
-1. Clone this repo.
-2. Make a build directory: `mkdir build && cd build`
-3. Compile: `cmake .. && make`
-4. Run it: `./mpc`.
+I tried N and dt at start period of my project's implementation,at that time ref speed is 40 km/h.
+my cost function is simple,just
+```
+ for (int i = 0; i < N; i++) {
+      fg[0] +=  CppAD::pow(vars[cte_start + i], 2);
+      fg[0] +=  CppAD::pow(vars[epsi_start + i], 2);
+      //impact average speed
+      fg[0] += CppAD::pow(vars[v_start + i] - ref_v, 2);
+    }
+```
+The first combination is dt=1,N = 8, this is a stupid choice,car's prediction just weird. Then i try to decrease dt,i just tried dt = 0.5 and dt = 0.1.It is my lucky,i got a reasonable value ,the car runs successfully.  
+But i also want to try other values to understand the impact ,then i try to increase N to 15, the car runs badly again , i understand it is because the horizon is too large .Then i decrease the N to find a reasonable horizon, the final N just 7,8.All right ,i come back to original.
+Then i try to decrease dt, i tried 0.08,0.05,0.01.The smaller dt, the car runs more jitter.From my understand,the reason is car change actuation too frequently. finally i chooose dt  = 0.08
 
-## Tips
+## Polynomial fit and Preprocessing
+Polynomial fitting function is provided, i think there is no more talk about its implementation. I  choise order = 3 just as the material taught.  
+I think in this section i should talk about coordinator transform. In my car model, current's cte is calculated by equation `y_t - f(x_t)`, just considered the diff in y axis. This equation is reasonable if we look from current car's local coordinate system, because of we only predict a small horizon , car can only change orientation angle little,so the change in x axis is small in the horizon time range.Car's motion can be approximated to straight line, thus cte is distance in y axis.  
+But if we use the global system, we will make mistake with this equation.There is a abviously example: If the car's running direction is just global coordinate system's y axis, the cte should be diff in x axis. so if we still use this equation to calculate cte, a mistak is maken. 
+So before polynomial fit, i make waypoints transform to car's local coordinate system. The code is :
+```
+ Eigen::VectorXd x_array(ptsx.size());
+ Eigen::VectorXd y_array(ptsx.size());
+ for (unsigned int i = 0; i < ptsx.size(); i++) {
+    double x_middle = ptsx[i] - px;
+    double y_middle = ptsy[i] - py;
+    double x_transformed = x_middle * std::cos(-psi) - y_middle * std::sin(-psi);
+    double y_transformed = x_middle * std::sin(-psi) + y_middle * std::cos(-psi);
 
-1. It's recommended to test the MPC on basic examples to see if your implementation behaves as desired. One possible example
-is the vehicle starting offset of a straight line (reference). If the MPC implementation is correct, after some number of timesteps
-(not too many) it should find and track the reference line.
-2. The `lake_track_waypoints.csv` file has the waypoints of the lake track. You could use this to fit polynomials and points and see of how well your model tracks curve. NOTE: This file might be not completely in sync with the simulator so your solution should NOT depend on it.
-3. For visualization this C++ [matplotlib wrapper](https://github.com/lava/matplotlib-cpp) could be helpful.)
-4.  Tips for setting up your environment are available [here](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/0949fca6-b379-42af-a919-ee50aa304e6a/lessons/f758c44c-5e40-4e01-93b5-1a82aa4e044f/concepts/23d376c7-0195-4276-bdf0-e02f1f3c665d)
-5. **VM Latency:** Some students have reported differences in behavior using VM's ostensibly a result of latency.  Please let us know if issues arise as a result of a VM environment.
+    x_array(i) = x_transformed;
+    y_array(i) = y_transformed;
+ }
+```
+## Latency
+I approximately consider the car runs obey the same model in latency period,so the car model can be used in the latency period. With this model,I calculated the car's status after latency time, and use these new position, orientation angle,accelerate as current status ,and  calculate actuators just as normal procedure.
+```
+  int latency = 100;
+  px = px + latency  * v * cos(psi) / 1000;
+  py = py + latency  * v * sin(psi) / 1000;
+  v = v + latency  * a / 1000;
+  psi = psi + v / 2.67 * delta * latency / 1000;
+```
+After this status transform , all the folowing calculate procedure keep same. But i need to tune the weight of cost function.
 
-## Editor Settings
+## Cost Function
+The wight tune for cost function is crutial to my project, show the function first:
+```
+for (int i = 0; i < N; i++) {
+      fg[0] += (10 + i + 1) * CppAD::pow(vars[cte_start + i], 2);
+      fg[0] += (10000 + 2500*(i + 1)) * CppAD::pow(vars[epsi_start + i], 2);
+      //impact average speed
+      fg[0] += CppAD::pow(vars[v_start + i] - ref_v, 2);
+    }
 
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
+	//constraint accelarate and steering angle
+    for (int i = 0; i < N - 1; i++) {
+      //control jitter
+      fg[0] += 10000 * CppAD::pow(vars[delta_start + i], 2);
+      //impact max speed
+      fg[0] += 12 * CppAD::pow(vars[a_start + i], 2);
+    }
 
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
+	//constraint accelarate and steering angle change between nearby dt
+    for (int i = 0; i < N - 2; i++) {
+      fg[0] += 1000 * CppAD::pow(vars[delta_start + i] - vars[delta_start + i - 1], 2);
+      fg[0] += 12 * CppAD::pow(vars[a_start + i] - vars[a_start + i - 1], 2);
+    }
+	// TODO add curvature_to_speed factor to decrease speed at curve road
+```
+In this function i constrainted cte,epsi, prevent v from becoming zero, constrainted steer angle,accelerate, steer angle change and accelerate change between nearby dt.I conclude some points :
+* when car's speed become large, we must control epsi,steering angle  ,steering angle change better, constraints their range, thus car can runs smooth
+* when car runs fast, we can allow a relatively larger cte in car's nearby range,but the final cte is smaller. Thus when car run over a curve ,it will make a distance to center line advancely to pass through the curve. Same as epsi
 
-## Code Style
-
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
-
-## Project Instructions and Rubric
-
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
-
-More information is only accessible by people who are already enrolled in Term 2
-of CarND. If you are enrolled, see [the project page](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/f1820894-8322-4bb3-81aa-b26b3c6dcbaf/lessons/b1ff3be0-c904-438e-aad3-2b5379f0e0c3/concepts/1a2255a0-e23c-44cf-8d41-39b8a3c8264a)
-for instructions and the project rubric.
-
-## Hints!
-
-* You don't have to follow this directory structure, but if you do, your work
-  will span all of the .cpp files here. Keep an eye out for TODOs.
-
-## Call for IDE Profiles Pull Requests
-
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to we ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).

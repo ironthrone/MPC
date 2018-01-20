@@ -111,10 +111,10 @@ int main() {
           v = v + latency  * a / 1000;
           psi = psi + v / 2.67 * delta * latency / 1000;
 
-          std::cout << "px: " << px << "\n";
-          std::cout << "py: " << py << "\n";
-          std::cout << "psi: " << psi << "\n";
-          std::cout << "v: " << v << "\n";
+//          std::cout << "px: " << px << "\n";
+//          std::cout << "py: " << py << "\n";
+//          std::cout << "psi: " << psi << "\n";
+//          std::cout << "v: " << v << "\n";
 
           Eigen::VectorXd x_array(ptsx.size());
           Eigen::VectorXd y_array(ptsx.size());
@@ -145,7 +145,7 @@ int main() {
           Eigen::VectorXd state(6);
           state << px_trans, py_trans, psi_trans, v, cte, epsi;
 
-          std::cout << state << std::endl;
+//          std::cout << state << std::endl;
 
           vector<double> result = mpc.Solve(state, coeffs);
           double steer_value;
