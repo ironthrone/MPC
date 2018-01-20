@@ -23,7 +23,7 @@ double dt = 0.08;
 size_t N = 7;
 
 const double Lf = 2.67;
-int ref_v = 120;
+int ref_v = 100;
 
 size_t x_start = 0;
 size_t y_start = x_start + N;
